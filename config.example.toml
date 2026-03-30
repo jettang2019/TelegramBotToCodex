@@ -8,6 +8,10 @@ log_level = "INFO"
 # - One bot maps to one workdir.
 # - Add more [[bots]] blocks when you need more bot + repo pairs.
 # - `telegram_username` may include or omit the leading @.
+# - `codex_execution_mode` controls which Codex CLI execution flag is used for this bot.
+#   - "default": no extra flag; use the machine/session default Codex execution mode.
+#   - "full-auto": adds `--full-auto`; recommended default for this bridge.
+#   - "danger-full-access": adds `--dangerously-bypass-approvals-and-sandbox`; only use on a trusted machine.
 
 [[bots]]
 name = "repo-a"
