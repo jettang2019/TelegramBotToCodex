@@ -10,7 +10,7 @@ from telegram_bot_to_codex.state import StateStore
 
 
 class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_streaming_sends_agent_message_without_duplicate_final_reply(self) -> None:
+    async def test_streaming_flushes_completed_lines_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workdir = root / "repo"
@@ -73,14 +73,14 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                         {
                             "type": "item.agent_message.delta",
                             "item_id": "item-1",
-                            "delta": "Final",
+                            "delta": "Line 1\nLine",
                         }
                     )
                     await event_callback(
                         {
                             "type": "item.agent_message.delta",
                             "item_id": "item-1",
-                            "delta": " answer",
+                            "delta": " 2",
                         }
                     )
                     await event_callback(
@@ -89,14 +89,14 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                             "item": {
                                 "type": "agent_message",
                                 "id": "item-1",
-                                "text": "Final answer",
+                                "text": "Line 1\nLine 2",
                             },
                         }
                     )
                     await event_callback({"type": "turn.completed"})
                 return CodexResult(
                     thread_id="thread-1",
-                    reply="Final answer",
+                    reply="Line 1\nLine 2",
                     duration_seconds=0.25,
                 )
 
@@ -118,7 +118,7 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                 sent_messages,
                 [
                     (42, "Message received. Codex is starting now.", 7),
-                    (42, "Final", None),
+                    (42, "Line 1", None),
                 ],
             )
             self.assertEqual(
@@ -126,7 +126,7 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                 [
                     (42, 9001, "Codex started working on your request."),
                     (42, 9001, "Running command: bash -lc ls"),
-                    (42, 9002, "Final answer"),
+                    (42, 9002, "Line 1\nLine 2"),
                     (42, 9001, "Codex finished processing your request."),
                 ],
             )

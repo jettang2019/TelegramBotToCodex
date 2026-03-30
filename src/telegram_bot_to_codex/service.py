@@ -22,6 +22,7 @@ class _StreamProgressState:
     last_streamed_reply: Optional[str] = None
     active_stream_item_id: Optional[str] = None
     active_stream_text: str = ""
+    active_stream_rendered_text: str = ""
     active_stream_message_ids: List[int] = field(default_factory=list)
     active_stream_chunks: List[str] = field(default_factory=list)
     last_stream_flush_at: float = 0.0
@@ -419,6 +420,7 @@ class BridgeService:
             return
         stream_state.active_stream_item_id = item_id
         stream_state.active_stream_text = ""
+        stream_state.active_stream_rendered_text = ""
         stream_state.active_stream_message_ids = []
         stream_state.active_stream_chunks = []
         stream_state.last_stream_flush_at = 0.0
@@ -431,8 +433,8 @@ class BridgeService:
         *,
         force: bool,
     ) -> None:
-        normalized_text = stream_state.active_stream_text.strip()
-        if not normalized_text:
+        candidate_text = _stream_render_text(stream_state.active_stream_text, force=force)
+        if candidate_text is None or candidate_text == stream_state.active_stream_rendered_text:
             return
 
         now = time.monotonic()
@@ -443,7 +445,7 @@ class BridgeService:
         ):
             return
 
-        desired_chunks = _split_telegram_message(normalized_text)
+        desired_chunks = _split_telegram_message(candidate_text)
         for index, chunk in enumerate(desired_chunks):
             if index < len(stream_state.active_stream_message_ids):
                 if index < len(stream_state.active_stream_chunks) and stream_state.active_stream_chunks[index] == chunk:
@@ -465,6 +467,7 @@ class BridgeService:
                     return
                 stream_state.active_stream_message_ids.append(message_id)
 
+        stream_state.active_stream_rendered_text = candidate_text
         stream_state.active_stream_chunks = desired_chunks
         stream_state.last_stream_flush_at = now
 
@@ -493,6 +496,19 @@ def _split_telegram_message(text: str, limit: int = 4000) -> List[str]:
     if current:
         chunks.append(current.rstrip())
     return chunks
+
+
+def _stream_render_text(text: str, *, force: bool) -> Optional[str]:
+    if force:
+        normalized = text.strip()
+        return normalized or None
+
+    last_newline = text.rfind("\n")
+    if last_newline < 0:
+        return None
+
+    normalized = text[: last_newline + 1].strip()
+    return normalized or None
 
 
 def _split_long_line(line: str, limit: int) -> List[str]:
