@@ -90,7 +90,7 @@ Any other text message is forwarded to Codex.
 ## Notes
 
 - This service only handles private chats.
-- Long-running Codex tasks send an English progress message about every 10 seconds so the chat does not look stalled.
+- Long-running Codex tasks stream Codex JSONL events back into Telegram. The bot keeps one English status message updated and forwards agent messages as soon as they arrive.
 - On startup the service validates the configured `codex` binary and every Telegram bot token.
 - Username-based access control depends on the Telegram username staying unchanged. If the username
   changes, update `config.toml`.

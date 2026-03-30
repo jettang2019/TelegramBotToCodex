@@ -5,13 +5,16 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from .config import BotSettings
 
 
 class CodexExecutionError(RuntimeError):
     pass
+
+
+CodexEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class CodexClient:
         bot: BotSettings,
         prompt: str,
         thread_id: Optional[str],
+        event_callback: Optional[CodexEventCallback] = None,
     ) -> CodexResult:
         started_at = time.monotonic()
         command = self._build_command(bot, prompt, thread_id)
@@ -39,16 +43,18 @@ class CodexClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
-
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        stderr_task = asyncio.create_task(self._read_stream_lines(process.stderr))
         next_thread_id = thread_id
         last_message: Optional[str] = None
         logs: List[str] = []
 
-        for raw_line in stdout_text.splitlines():
-            line = raw_line.strip()
+        assert process.stdout is not None
+        while True:
+            raw_line = await process.stdout.readline()
+            if not raw_line:
+                break
+
+            line = raw_line.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
 
@@ -58,19 +64,20 @@ class CodexClient:
                 logs.append(line)
                 continue
 
-            event_type = event.get("type")
-            if event_type == "thread.started":
-                candidate = event.get("thread_id")
-                if isinstance(candidate, str) and candidate:
-                    next_thread_id = candidate
-            elif event_type == "item.completed":
-                item = event.get("item", {})
-                if item.get("type") == "agent_message":
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        last_message = text.strip()
+            if event_callback is not None:
+                await event_callback(event)
 
-        if process.returncode != 0:
+            next_thread_id, last_message = self._apply_event(
+                event,
+                next_thread_id=next_thread_id,
+                last_message=last_message,
+            )
+
+        return_code = await process.wait()
+        stderr_lines = await stderr_task
+        stderr_text = "\n".join(stderr_lines).strip()
+
+        if return_code != 0:
             detail = stderr_text or "\n".join(logs) or "Unknown Codex CLI failure"
             raise CodexExecutionError(detail)
 
@@ -82,6 +89,39 @@ class CodexClient:
             reply=last_message,
             duration_seconds=time.monotonic() - started_at,
         )
+
+    async def _read_stream_lines(
+        self,
+        stream: Optional[asyncio.StreamReader],
+    ) -> List[str]:
+        if stream is None:
+            return []
+
+        lines: List[str] = []
+        while True:
+            raw_line = await stream.readline()
+            if not raw_line:
+                return lines
+            lines.append(raw_line.decode("utf-8", errors="replace").rstrip())
+
+    def _apply_event(
+        self,
+        event: Dict[str, Any],
+        next_thread_id: Optional[str],
+        last_message: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        event_type = event.get("type")
+        if event_type == "thread.started":
+            candidate = event.get("thread_id")
+            if isinstance(candidate, str) and candidate:
+                next_thread_id = candidate
+        elif event_type == "item.completed":
+            item = event.get("item", {})
+            if item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    last_message = text.strip()
+        return next_thread_id, last_message
 
     def _build_command(
         self,

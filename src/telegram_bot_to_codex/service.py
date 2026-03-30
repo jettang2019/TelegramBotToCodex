@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .codex import CodexClient, CodexExecutionError
@@ -12,6 +11,13 @@ from .state import StateStore
 from .telegram_api import TelegramApiClient, TelegramApiError
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class _StreamProgressState:
+    status_message_id: Optional[int]
+    last_status_text: Optional[str] = None
+    last_streamed_reply: Optional[str] = None
 
 
 class BridgeService:
@@ -148,24 +154,57 @@ class BridgeService:
         except TelegramApiError:
             LOGGER.warning("Failed to send typing action for bot '%s'", bot.name, exc_info=True)
 
-        await self._send_reply(
+        initial_status = "Message received. Codex is starting now."
+        status_message_id = await self._send_reply(
             bot,
             chat_id,
-            "Message received. Codex is processing it now. I will send the final reply when it is ready.",
+            initial_status,
             reply_to_message_id=message_id,
         )
-
-        heartbeat_stop = asyncio.Event()
-        heartbeat_task = asyncio.create_task(
-            self._send_processing_updates(
-                bot=bot,
-                chat_id=chat_id,
-                stop_event=heartbeat_stop,
-            )
+        stream_state = _StreamProgressState(
+            status_message_id=status_message_id,
+            last_status_text=initial_status if status_message_id is not None else None,
         )
 
+        async def handle_codex_event(event: Dict[str, Any]) -> None:
+            item = event.get("item", {})
+            if (
+                event.get("type") == "item.completed"
+                and isinstance(item, dict)
+                and item.get("type") == "agent_message"
+            ):
+                streamed_text = item.get("text")
+                if isinstance(streamed_text, str) and streamed_text.strip():
+                    normalized_text = streamed_text.strip()
+                    stream_state.last_streamed_reply = normalized_text
+                    LOGGER.info(
+                        "Streaming agent message for bot '%s' chat %s (%s chars)",
+                        bot.name,
+                        chat_id,
+                        len(normalized_text),
+                    )
+                    await self._send_reply(
+                        bot,
+                        chat_id,
+                        normalized_text,
+                        reply_to_message_id=None,
+                    )
+
+            status_text = _stream_event_status_text(event)
+            if not status_text or status_text == stream_state.last_status_text:
+                return
+            if stream_state.status_message_id is None:
+                return
+
+            stream_state.last_status_text = status_text
+            await self._edit_status_message(
+                bot,
+                chat_id,
+                stream_state.status_message_id,
+                status_text,
+            )
+
         result: Optional[Any] = None
-        started_at = time.monotonic()
         try:
             LOGGER.info(
                 "Dispatching prompt to Codex for bot '%s' chat %s thread=%s",
@@ -173,18 +212,38 @@ class BridgeService:
                 chat_id,
                 thread_id or "<new>",
             )
-            result = await self.codex.run_prompt(bot, text, thread_id)
+            result = await self.codex.run_prompt(
+                bot,
+                text,
+                thread_id,
+                event_callback=handle_codex_event,
+            )
         except CodexExecutionError as exc:
             if thread_id:
                 LOGGER.warning(
                     "Stored thread id failed for bot '%s'; clearing state and retrying once",
                     bot.name,
                 )
+                if stream_state.status_message_id is not None:
+                    retry_status = "Stored Codex thread failed. Retrying with a fresh thread."
+                    stream_state.last_status_text = retry_status
+                    await self._edit_status_message(
+                        bot,
+                        chat_id,
+                        stream_state.status_message_id,
+                        retry_status,
+                    )
                 await self.state.clear_thread(bot.name, chat_id)
                 try:
-                    result = await self.codex.run_prompt(bot, text, None)
+                    result = await self.codex.run_prompt(
+                        bot,
+                        text,
+                        None,
+                        event_callback=handle_codex_event,
+                    )
                 except CodexExecutionError as retry_exc:
                     LOGGER.exception("Codex retry failed for bot '%s'", bot.name)
+                    await self._update_failed_status(bot, chat_id, stream_state, "Codex execution failed.")
                     await self._send_reply(
                         bot,
                         chat_id,
@@ -194,6 +253,7 @@ class BridgeService:
                     return
             else:
                 LOGGER.exception("Codex execution failed for bot '%s'", bot.name)
+                await self._update_failed_status(bot, chat_id, stream_state, "Codex execution failed.")
                 await self._send_reply(
                     bot,
                     chat_id,
@@ -201,11 +261,6 @@ class BridgeService:
                     reply_to_message_id=None,
                 )
                 return
-        finally:
-            heartbeat_stop.set()
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
 
         if result.thread_id and result.thread_id != thread_id:
             await self.state.set_thread(bot.name, chat_id, bot.workdir, result.thread_id)
@@ -216,42 +271,33 @@ class BridgeService:
                 chat_id,
             )
 
+        if stream_state.status_message_id is not None:
+            final_status = "Codex finished processing your request."
+            if stream_state.last_status_text != final_status:
+                stream_state.last_status_text = final_status
+                await self._edit_status_message(
+                    bot,
+                    chat_id,
+                    stream_state.status_message_id,
+                    final_status,
+                )
+
+        if stream_state.last_streamed_reply == result.reply:
+            LOGGER.info(
+                "Final reply for bot '%s' chat %s was already streamed; skipping duplicate send",
+                bot.name,
+                chat_id,
+            )
+            return
+
         LOGGER.info(
             "Sending Codex reply for bot '%s' chat %s (%s chars, %.2fs)",
             bot.name,
             chat_id,
             len(result.reply),
-            result.duration_seconds or (time.monotonic() - started_at),
+            result.duration_seconds,
         )
         await self._send_reply(bot, chat_id, result.reply, reply_to_message_id=None)
-
-    async def _send_processing_updates(
-        self,
-        bot: BotSettings,
-        chat_id: int,
-        stop_event: asyncio.Event,
-        interval_seconds: float = 10.0,
-    ) -> None:
-        elapsed_intervals = 0
-        while True:
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-                return
-            except asyncio.TimeoutError:
-                elapsed_intervals += 1
-                elapsed_seconds = max(1, int(round(elapsed_intervals * interval_seconds)))
-                LOGGER.info(
-                    "Sending processing heartbeat for bot '%s' chat %s after %ss",
-                    bot.name,
-                    chat_id,
-                    elapsed_seconds,
-                )
-                await self._send_reply(
-                    bot,
-                    chat_id,
-                    _processing_status_text(elapsed_seconds),
-                    reply_to_message_id=None,
-                )
 
     def _is_authorized(self, bot: BotSettings, message: Dict[str, Any]) -> bool:
         sender = message.get("from", {})
@@ -291,10 +337,11 @@ class BridgeService:
         chat_id: int,
         text: str,
         reply_to_message_id: Optional[int],
-    ) -> None:
+    ) -> Optional[int]:
+        sent_message_id: Optional[int] = None
         for chunk in _split_telegram_message(text):
             try:
-                await self.telegram.send_message(
+                response = await self.telegram.send_message(
                     token=bot.token,
                     chat_id=chat_id,
                     text=chunk,
@@ -302,8 +349,45 @@ class BridgeService:
                 )
             except TelegramApiError:
                 LOGGER.exception("Failed to send Telegram reply for bot '%s'", bot.name)
-                return
+                return sent_message_id
+            if sent_message_id is None:
+                sent_message_id = _extract_message_id(response)
             reply_to_message_id = None
+        return sent_message_id
+
+    async def _edit_status_message(
+        self,
+        bot: BotSettings,
+        chat_id: int,
+        message_id: int,
+        text: str,
+    ) -> None:
+        try:
+            await self.telegram.edit_message_text(
+                token=bot.token,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+            )
+        except TelegramApiError:
+            LOGGER.exception("Failed to edit Telegram status message for bot '%s'", bot.name)
+
+    async def _update_failed_status(
+        self,
+        bot: BotSettings,
+        chat_id: int,
+        stream_state: _StreamProgressState,
+        text: str,
+    ) -> None:
+        if stream_state.status_message_id is None:
+            return
+        stream_state.last_status_text = text
+        await self._edit_status_message(
+            bot,
+            chat_id,
+            stream_state.status_message_id,
+            text,
+        )
 
 
 def _split_telegram_message(text: str, limit: int = 4000) -> List[str]:
@@ -348,7 +432,50 @@ def _preview_text(text: str, limit: int = 120) -> str:
     return f"{normalized[: limit - 3]}..."
 
 
-def _processing_status_text(elapsed_seconds: int) -> str:
-    return (
-        f"Still processing your request. Codex has been working for about {elapsed_seconds} seconds."
-    )
+def _extract_message_id(response: Dict[str, Any]) -> Optional[int]:
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return None
+    message_id = result.get("message_id")
+    if isinstance(message_id, int):
+        return message_id
+    return None
+
+
+def _stream_event_status_text(event: Dict[str, Any]) -> Optional[str]:
+    event_type = event.get("type")
+    if event_type == "turn.started":
+        return "Codex started working on your request."
+    if event_type == "turn.completed":
+        return "Codex finished processing your request."
+    if event_type not in {"item.started", "item.completed"}:
+        return None
+
+    item = event.get("item")
+    if not isinstance(item, dict):
+        return None
+
+    item_type = item.get("type")
+    if item_type == "agent_message":
+        return None
+
+    if item_type == "command_execution":
+        command = item.get("command")
+        verb = "Running" if event_type == "item.started" else "Finished"
+        if isinstance(command, str) and command.strip():
+            return f"{verb} command: {_preview_text(command, limit=100)}"
+        return f"Codex {verb.lower()} a command."
+
+    if item_type == "reasoning":
+        return "Codex is analyzing the request."
+    if item_type == "web_search":
+        return "Codex is searching the web."
+    if item_type == "mcp_tool_call":
+        return "Codex is calling an external tool."
+    if item_type in {"file_change", "file_changes"}:
+        if event_type == "item.started":
+            return "Codex is preparing file changes."
+        return "Codex finished applying file changes."
+    if item_type == "plan_update":
+        return "Codex updated its plan."
+    return None

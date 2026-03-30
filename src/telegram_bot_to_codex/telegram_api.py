@@ -50,6 +50,20 @@ class TelegramApiClient:
             payload["reply_to_message_id"] = reply_to_message_id
         return await self._request(token, "sendMessage", payload, 20)
 
+    async def edit_message_text(
+        self,
+        token: str,
+        chat_id: int,
+        message_id: int,
+        text: str,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+        }
+        return await self._request(token, "editMessageText", payload, 20)
+
     async def send_chat_action(self, token: str, chat_id: int, action: str = "typing") -> None:
         await self._request(token, "sendChatAction", {"chat_id": chat_id, "action": action}, 10)
 
