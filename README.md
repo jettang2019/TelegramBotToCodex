@@ -49,6 +49,10 @@ Then edit the local `config.toml` file in the repo root:
 make start
 ```
 
+After the service is running, open the bot's private chat in Telegram and send `/start` once before
+testing normal messages. In actual use this is required to activate the chat reliably; otherwise
+later text messages may appear to be ignored.
+
 Useful commands:
 
 ```bash
@@ -82,7 +86,8 @@ The underlying script is `./scripts/service.sh`, so you can also run:
 
 ## Telegram commands
 
-- `/start` or `/help`: show usage.
+- `/start`: activate the private chat after the service is up, then show usage.
+- `/help`: show usage.
 - `/status`: show the current Codex thread id for this bot chat.
 - `/reset`: clear the saved Codex thread id and start a fresh context next time.
 - `/whoami`: show your Telegram username and numeric user id.
@@ -92,6 +97,7 @@ Any other text message is forwarded to Codex.
 ## Notes
 
 - This service only handles private chats.
+- For a newly started service, send `/start` in the bot's private chat before expecting normal text messages to be processed.
 - The bridge keeps one long-lived `codex app-server` session per configured bot. Telegram messages become turns inside that session, so there is less per-message startup overhead than the older `codex exec` approach.
 - Long-running Codex tasks stream `codex app-server` events back into Telegram. The bot keeps one English status message updated and incrementally edits the reply as agent message text arrives.
 - On startup the service validates the configured `codex` binary and every Telegram bot token.
