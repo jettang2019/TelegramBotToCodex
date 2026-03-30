@@ -21,6 +21,7 @@ directory and one allowed Telegram account from a local config file.
 - `config.example.toml`: checked-in example config.
 - `config.toml`: local runtime config, ignored by Git.
 - `.local/state.json`: local thread and polling state, ignored by Git.
+- `.local/service.log` and `.local/service.pid`: local runtime log and PID files for the helper commands.
 
 ## Setup
 
@@ -42,13 +43,38 @@ Then edit the local `config.toml` file in the repo root:
 ## Run
 
 ```bash
-python -u -m telegram_bot_to_codex --config config.toml 2>&1 | tee .local/service.log
+make start
+```
+
+Useful commands:
+
+```bash
+make status
+make logs
+make stop
+make restart
+```
+
+Run in the foreground:
+
+```bash
+make run
 ```
 
 If you want more verbose logs during debugging:
 
 ```bash
-python -u -m telegram_bot_to_codex --config config.toml --log-level DEBUG 2>&1 | tee .local/service.log
+make debug
+make debug-start
+```
+
+The underlying script is `./scripts/service.sh`, so you can also run:
+
+```bash
+./scripts/service.sh start
+./scripts/service.sh stop
+./scripts/service.sh status
+./scripts/service.sh logs
 ```
 
 ## Telegram commands

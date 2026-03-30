@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -17,6 +18,7 @@ class CodexExecutionError(RuntimeError):
 class CodexResult:
     thread_id: Optional[str]
     reply: str
+    duration_seconds: float
 
 
 class CodexClient:
@@ -29,6 +31,7 @@ class CodexClient:
         prompt: str,
         thread_id: Optional[str],
     ) -> CodexResult:
+        started_at = time.monotonic()
         command = self._build_command(bot, prompt, thread_id)
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -41,7 +44,7 @@ class CodexClient:
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         next_thread_id = thread_id
-        messages: List[str] = []
+        last_message: Optional[str] = None
         logs: List[str] = []
 
         for raw_line in stdout_text.splitlines():
@@ -65,16 +68,20 @@ class CodexClient:
                 if item.get("type") == "agent_message":
                     text = item.get("text")
                     if isinstance(text, str) and text.strip():
-                        messages.append(text.strip())
+                        last_message = text.strip()
 
         if process.returncode != 0:
             detail = stderr_text or "\n".join(logs) or "Unknown Codex CLI failure"
             raise CodexExecutionError(detail)
 
-        if not messages:
+        if not last_message:
             raise CodexExecutionError("Codex completed without a final agent message")
 
-        return CodexResult(thread_id=next_thread_id, reply="\n\n".join(messages))
+        return CodexResult(
+            thread_id=next_thread_id,
+            reply=last_message,
+            duration_seconds=time.monotonic() - started_at,
+        )
 
     def _build_command(
         self,

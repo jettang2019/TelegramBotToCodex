@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .codex import CodexClient, CodexExecutionError
@@ -146,7 +147,15 @@ class BridgeService:
         except TelegramApiError:
             LOGGER.warning("Failed to send typing action for bot '%s'", bot.name, exc_info=True)
 
+        await self._send_reply(
+            bot,
+            chat_id,
+            "Message received. Codex is processing it now. I will send the final reply when it is ready.",
+            reply_to_message_id=message_id,
+        )
+
         result: Optional[Any] = None
+        started_at = time.monotonic()
         try:
             LOGGER.info(
                 "Dispatching prompt to Codex for bot '%s' chat %s thread=%s",
@@ -193,12 +202,13 @@ class BridgeService:
             )
 
         LOGGER.info(
-            "Sending Codex reply for bot '%s' chat %s (%s chars)",
+            "Sending Codex reply for bot '%s' chat %s (%s chars, %.2fs)",
             bot.name,
             chat_id,
             len(result.reply),
+            result.duration_seconds or (time.monotonic() - started_at),
         )
-        await self._send_reply(bot, chat_id, result.reply, reply_to_message_id=message_id)
+        await self._send_reply(bot, chat_id, result.reply, reply_to_message_id=None)
 
     def _is_authorized(self, bot: BotSettings, message: Dict[str, Any]) -> bool:
         sender = message.get("from", {})
