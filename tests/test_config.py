@@ -37,6 +37,7 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(config.app.state_path, (root / ".local/state.json").resolve())
             self.assertEqual(config.bots[0].normalized_username, "demo")
+            self.assertEqual(config.bots[0].codex_execution_mode, "full-auto")
 
     def test_duplicate_bot_name_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -60,6 +61,32 @@ class ConfigTests(unittest.TestCase):
                     token = "123:def"
                     workdir = "{workdir}"
                     telegram_username = "@demo2"
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
+
+    def test_invalid_execution_mode_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workdir = root / "repo"
+            workdir.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                textwrap.dedent(
+                    f"""
+                    [app]
+
+                    [[bots]]
+                    name = "demo"
+                    token = "123:abc"
+                    workdir = "{workdir}"
+                    telegram_username = "@demo"
+                    codex_execution_mode = "invalid-mode"
                     """
                 ).strip()
                 + "\n",

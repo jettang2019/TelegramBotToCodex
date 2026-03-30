@@ -37,6 +37,7 @@ Then edit the local `config.toml` file in the repo root:
 - Set an absolute `workdir`.
 - Set `telegram_username` and keep the `@` or omit it, both work.
 - Optionally add `telegram_user_id` for stronger access control.
+- Set `codex_execution_mode`. Recommended: `full-auto`.
 - Keep adding `[[bots]]` blocks if you need more bot + workdir pairs.
 - Do not commit `config.toml`; it is already ignored by Git.
 
@@ -89,9 +90,13 @@ Any other text message is forwarded to Codex.
 ## Notes
 
 - This service only handles private chats.
+- Long-running Codex tasks send an English progress message about every 10 seconds so the chat does not look stalled.
 - On startup the service validates the configured `codex` binary and every Telegram bot token.
 - Username-based access control depends on the Telegram username staying unchanged. If the username
   changes, update `config.toml`.
 - Use `/whoami` once from Telegram if you want to copy your numeric `telegram_user_id` into
   `config.toml`.
 - If the target `workdir` is not a Git repository, leave `skip_git_repo_check = true`.
+- `codex_execution_mode = "full-auto"` is the recommended write-capable mode for this bridge. It maps to Codex CLI `--full-auto`, which uses workspace-write sandboxing.
+- `codex_execution_mode = "danger-full-access"` maps to `--dangerously-bypass-approvals-and-sandbox` and should only be used on a trusted machine.
+- If an older saved Codex thread still behaves like a read-only session after you change this setting, send `/reset` in Telegram to start a fresh thread.

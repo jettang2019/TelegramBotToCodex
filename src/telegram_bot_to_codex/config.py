@@ -14,6 +14,13 @@ class ConfigError(ValueError):
     """Raised when the runtime config is invalid."""
 
 
+VALID_CODEX_EXECUTION_MODES = {
+    "default",
+    "full-auto",
+    "danger-full-access",
+}
+
+
 def normalize_username(username: str) -> str:
     normalized = username.strip().lower().removeprefix("@")
     if not normalized:
@@ -37,6 +44,7 @@ class BotSettings:
     telegram_username: str
     telegram_user_id: Optional[int]
     skip_git_repo_check: bool
+    codex_execution_mode: str
 
     @property
     def normalized_username(self) -> str:
@@ -88,11 +96,17 @@ def _parse_bot(raw: Dict[str, Any], config_dir: Path) -> BotSettings:
     telegram_username = _require_string(raw, "telegram_username")
     telegram_user_id = _require_optional_int(raw, "telegram_user_id")
     skip_git_repo_check = _require_bool(raw, "skip_git_repo_check", default=True)
+    codex_execution_mode = _require_string(raw, "codex_execution_mode", default="full-auto")
 
     if not workdir.is_dir():
         raise ConfigError(f"Bot '{name}' workdir does not exist or is not a directory: {workdir}")
 
     normalize_username(telegram_username)
+    if codex_execution_mode not in VALID_CODEX_EXECUTION_MODES:
+        raise ConfigError(
+            "Config key 'codex_execution_mode' must be one of: "
+            + ", ".join(sorted(VALID_CODEX_EXECUTION_MODES))
+        )
 
     return BotSettings(
         name=name,
@@ -101,6 +115,7 @@ def _parse_bot(raw: Dict[str, Any], config_dir: Path) -> BotSettings:
         telegram_username=telegram_username,
         telegram_user_id=telegram_user_id,
         skip_git_repo_check=skip_git_repo_check,
+        codex_execution_mode=codex_execution_mode,
     )
 
 

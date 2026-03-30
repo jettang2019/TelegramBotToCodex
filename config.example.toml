@@ -15,6 +15,7 @@ token = "123456789:replace-with-your-bot-token"
 workdir = "/absolute/path/to/your/workdir"
 telegram_username = "@your_telegram_username"
 skip_git_repo_check = true
+codex_execution_mode = "full-auto"
 
 # Optional stronger binding if you want to pin a numeric Telegram user id too.
 # telegram_user_id = 123456789
@@ -25,6 +26,7 @@ token = "123456789:replace-with-your-second-bot-token"
 workdir = "/absolute/path/to/your/second/workdir"
 telegram_username = "@your_telegram_username"
 skip_git_repo_check = true
+codex_execution_mode = "full-auto"
 
 [[bots]]
 name = "docs-repo"
@@ -32,4 +34,5 @@ token = "123456789:replace-with-your-third-bot-token"
 workdir = "/absolute/path/to/your/docs/repo"
 telegram_username = "your_telegram_username"
 skip_git_repo_check = false
+codex_execution_mode = "default"
 # telegram_user_id = 123456789

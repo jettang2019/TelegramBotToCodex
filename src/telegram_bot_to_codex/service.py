@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -154,6 +155,15 @@ class BridgeService:
             reply_to_message_id=message_id,
         )
 
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task = asyncio.create_task(
+            self._send_processing_updates(
+                bot=bot,
+                chat_id=chat_id,
+                stop_event=heartbeat_stop,
+            )
+        )
+
         result: Optional[Any] = None
         started_at = time.monotonic()
         try:
@@ -188,9 +198,14 @@ class BridgeService:
                     bot,
                     chat_id,
                     f"Codex execution failed:\n{exc}",
-                    reply_to_message_id=message_id,
+                    reply_to_message_id=None,
                 )
                 return
+        finally:
+            heartbeat_stop.set()
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
 
         if result.thread_id and result.thread_id != thread_id:
             await self.state.set_thread(bot.name, chat_id, bot.workdir, result.thread_id)
@@ -209,6 +224,34 @@ class BridgeService:
             result.duration_seconds or (time.monotonic() - started_at),
         )
         await self._send_reply(bot, chat_id, result.reply, reply_to_message_id=None)
+
+    async def _send_processing_updates(
+        self,
+        bot: BotSettings,
+        chat_id: int,
+        stop_event: asyncio.Event,
+        interval_seconds: float = 10.0,
+    ) -> None:
+        elapsed_intervals = 0
+        while True:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+                return
+            except asyncio.TimeoutError:
+                elapsed_intervals += 1
+                elapsed_seconds = max(1, int(round(elapsed_intervals * interval_seconds)))
+                LOGGER.info(
+                    "Sending processing heartbeat for bot '%s' chat %s after %ss",
+                    bot.name,
+                    chat_id,
+                    elapsed_seconds,
+                )
+                await self._send_reply(
+                    bot,
+                    chat_id,
+                    _processing_status_text(elapsed_seconds),
+                    reply_to_message_id=None,
+                )
 
     def _is_authorized(self, bot: BotSettings, message: Dict[str, Any]) -> bool:
         sender = message.get("from", {})
@@ -303,3 +346,9 @@ def _preview_text(text: str, limit: int = 120) -> str:
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 3]}..."
+
+
+def _processing_status_text(elapsed_seconds: int) -> str:
+    return (
+        f"Still processing your request. Codex has been working for about {elapsed_seconds} seconds."
+    )

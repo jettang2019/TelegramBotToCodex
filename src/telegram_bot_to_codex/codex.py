@@ -91,13 +91,22 @@ class CodexClient:
     ) -> List[str]:
         if thread_id:
             command = [self.codex_bin, "exec", "resume", "--json"]
+            command.extend(self._execution_mode_args(bot))
             if bot.skip_git_repo_check:
                 command.append("--skip-git-repo-check")
             command.extend([thread_id, prompt])
             return command
 
         command = [self.codex_bin, "exec", "--json", "-C", str(bot.workdir)]
+        command.extend(self._execution_mode_args(bot))
         if bot.skip_git_repo_check:
             command.append("--skip-git-repo-check")
         command.append(prompt)
         return command
+
+    def _execution_mode_args(self, bot: BotSettings) -> List[str]:
+        if bot.codex_execution_mode == "full-auto":
+            return ["--full-auto"]
+        if bot.codex_execution_mode == "danger-full-access":
+            return ["--dangerously-bypass-approvals-and-sandbox"]
+        return []
