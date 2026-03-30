@@ -42,7 +42,13 @@ Then edit the local `config.toml` file in the repo root:
 ## Run
 
 ```bash
-python -m telegram_bot_to_codex --config config.toml
+python -u -m telegram_bot_to_codex --config config.toml 2>&1 | tee .local/service.log
+```
+
+If you want more verbose logs during debugging:
+
+```bash
+python -u -m telegram_bot_to_codex --config config.toml --log-level DEBUG 2>&1 | tee .local/service.log
 ```
 
 ## Telegram commands

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,11 @@ def main() -> int:
         default=Path("config.toml"),
         help="Path to the local TOML config file",
     )
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        help="Override log level for this run, for example DEBUG or INFO",
+    )
     args = parser.parse_args()
 
     try:
@@ -29,10 +35,18 @@ def main() -> int:
         print(f"Configuration error: {exc}")
         return 1
 
+    log_level_name = (args.log_level or config.app.log_level).upper()
     logging.basicConfig(
-        level=getattr(logging, config.app.log_level, logging.INFO),
+        level=getattr(logging, log_level_name, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
+        force=True,
     )
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Telegram Bot To Codex")
+    logger.info("Using config file: %s", args.config.resolve())
+    logger.info("Using state file: %s", config.app.state_path)
+    logger.info("Configured bots: %s", len(config.bots))
 
     state = StateStore(config.app.state_path)
     asyncio.run(_run(config, state))
@@ -42,7 +56,9 @@ def main() -> int:
 async def _run(config, state: StateStore) -> None:
     await _validate_startup(config)
     await state.load()
+    logging.getLogger(__name__).info("Local state loaded successfully")
     service = BridgeService(config, state)
+    logging.getLogger(__name__).info("Service is ready and polling Telegram")
     await service.run()
 
 

@@ -28,6 +28,8 @@ class BridgeService:
     async def _poll_bot(self, bot: BotSettings) -> None:
         LOGGER.info("Polling bot '%s' for workdir %s", bot.name, bot.workdir)
         offset = await self.state.get_offset(bot.name)
+        if offset is not None:
+            LOGGER.info("Resuming Telegram update offset %s for bot '%s'", offset, bot.name)
 
         while True:
             try:
@@ -36,6 +38,8 @@ class BridgeService:
                     offset=offset,
                     timeout_seconds=self.config.app.poll_timeout_seconds,
                 )
+                if updates:
+                    LOGGER.info("Received %s update(s) for bot '%s'", len(updates), bot.name)
                 for update in updates:
                     update_id = update.get("update_id")
                     if isinstance(update_id, int):
@@ -68,6 +72,7 @@ class BridgeService:
             return
 
         if text.startswith("/whoami"):
+            LOGGER.info("Handling /whoami for bot '%s' chat %s", bot.name, chat_id)
             await self._send_reply(
                 bot,
                 chat_id,
@@ -77,6 +82,13 @@ class BridgeService:
             return
 
         if not self._is_authorized(bot, message):
+            sender = message.get("from", {})
+            LOGGER.warning(
+                "Unauthorized access attempt for bot '%s' from user_id=%s username=%s",
+                bot.name,
+                sender.get("id"),
+                sender.get("username"),
+            )
             await self._send_reply(
                 bot,
                 chat_id,
@@ -93,13 +105,21 @@ class BridgeService:
         chat_id = int(message["chat"]["id"])
         text = str(message["text"]).strip()
         message_id = message.get("message_id")
+        LOGGER.info(
+            "Authorized message for bot '%s' chat %s: %s",
+            bot.name,
+            chat_id,
+            _preview_text(text),
+        )
 
         if text.startswith("/start") or text.startswith("/help"):
+            LOGGER.info("Handling help command for bot '%s' chat %s", bot.name, chat_id)
             await self._send_reply(bot, chat_id, self._help_text(bot), reply_to_message_id=message_id)
             return
 
         if text.startswith("/status"):
             thread_id = await self.state.peek_thread(bot.name, chat_id)
+            LOGGER.info("Handling /status for bot '%s' chat %s thread=%s", bot.name, chat_id, thread_id)
             status = (
                 f"Current thread id: {thread_id}"
                 if thread_id
@@ -110,6 +130,7 @@ class BridgeService:
 
         if text.startswith("/reset"):
             await self.state.clear_thread(bot.name, chat_id)
+            LOGGER.info("Cleared saved thread for bot '%s' chat %s", bot.name, chat_id)
             await self._send_reply(
                 bot,
                 chat_id,
@@ -127,6 +148,12 @@ class BridgeService:
 
         result: Optional[Any] = None
         try:
+            LOGGER.info(
+                "Dispatching prompt to Codex for bot '%s' chat %s thread=%s",
+                bot.name,
+                chat_id,
+                thread_id or "<new>",
+            )
             result = await self.codex.run_prompt(bot, text, thread_id)
         except CodexExecutionError as exc:
             if thread_id:
@@ -158,7 +185,19 @@ class BridgeService:
 
         if result.thread_id and result.thread_id != thread_id:
             await self.state.set_thread(bot.name, chat_id, bot.workdir, result.thread_id)
+            LOGGER.info(
+                "Saved Codex thread '%s' for bot '%s' chat %s",
+                result.thread_id,
+                bot.name,
+                chat_id,
+            )
 
+        LOGGER.info(
+            "Sending Codex reply for bot '%s' chat %s (%s chars)",
+            bot.name,
+            chat_id,
+            len(result.reply),
+        )
         await self._send_reply(bot, chat_id, result.reply, reply_to_message_id=message_id)
 
     def _is_authorized(self, bot: BotSettings, message: Dict[str, Any]) -> bool:
@@ -247,3 +286,10 @@ def _split_long_line(line: str, limit: int) -> List[str]:
         chunks.append(line[start : start + limit].rstrip())
         start += limit
     return [chunk or "(empty response)" for chunk in chunks]
+
+
+def _preview_text(text: str, limit: int = 120) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
