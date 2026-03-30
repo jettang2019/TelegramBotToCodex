@@ -20,6 +20,15 @@ VALID_CODEX_EXECUTION_MODES = {
     "danger-full-access",
 }
 
+VALID_REASONING_EFFORTS = {
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+}
+
 
 def normalize_username(username: str) -> str:
     normalized = username.strip().lower().removeprefix("@")
@@ -45,6 +54,8 @@ class BotSettings:
     telegram_user_id: Optional[int]
     skip_git_repo_check: bool
     codex_execution_mode: str
+    model: Optional[str]
+    effort: Optional[str]
 
     @property
     def normalized_username(self) -> str:
@@ -97,6 +108,8 @@ def _parse_bot(raw: Dict[str, Any], config_dir: Path) -> BotSettings:
     telegram_user_id = _require_optional_int(raw, "telegram_user_id")
     skip_git_repo_check = _require_bool(raw, "skip_git_repo_check", default=True)
     codex_execution_mode = _require_string(raw, "codex_execution_mode", default="full-auto")
+    model = _require_optional_string(raw, "model")
+    effort = _require_optional_string(raw, "effort")
 
     if not workdir.is_dir():
         raise ConfigError(f"Bot '{name}' workdir does not exist or is not a directory: {workdir}")
@@ -107,6 +120,11 @@ def _parse_bot(raw: Dict[str, Any], config_dir: Path) -> BotSettings:
             "Config key 'codex_execution_mode' must be one of: "
             + ", ".join(sorted(VALID_CODEX_EXECUTION_MODES))
         )
+    if effort is not None and effort not in VALID_REASONING_EFFORTS:
+        raise ConfigError(
+            "Config key 'effort' must be one of: "
+            + ", ".join(sorted(VALID_REASONING_EFFORTS))
+        )
 
     return BotSettings(
         name=name,
@@ -116,6 +134,8 @@ def _parse_bot(raw: Dict[str, Any], config_dir: Path) -> BotSettings:
         telegram_user_id=telegram_user_id,
         skip_git_repo_check=skip_git_repo_check,
         codex_execution_mode=codex_execution_mode,
+        model=model,
+        effort=effort,
     )
 
 
@@ -161,6 +181,15 @@ def _require_optional_int(raw: Dict[str, Any], key: str) -> Optional[int]:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"Config key '{key}' must be an integer when provided")
+    return value
+
+
+def _require_optional_string(raw: Dict[str, Any], key: str) -> Optional[str]:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"Config key '{key}' must be a non-empty string when provided")
     return value
 
 

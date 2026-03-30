@@ -38,6 +38,8 @@ Then edit the local `config.toml` file in the repo root:
 - Set `telegram_username` and keep the `@` or omit it, both work.
 - Optionally add `telegram_user_id` for stronger access control.
 - Set `codex_execution_mode`. Recommended: `full-auto`.
+- Optionally set `model`, for example `gpt-5.4`.
+- Optionally set `effort`, for example `low`, `medium`, `high`, or `xhigh`.
 - Keep adding `[[bots]]` blocks if you need more bot + workdir pairs.
 - Do not commit `config.toml`; it is already ignored by Git.
 
@@ -100,4 +102,6 @@ Any other text message is forwarded to Codex.
 - `skip_git_repo_check` is still accepted in the config for backward compatibility, but the current `app-server` backend does not map that field to a verified Codex setting.
 - `codex_execution_mode = "full-auto"` is the recommended write-capable mode for this bridge. In this project it asks `app-server` for `approvalPolicy = "never"` plus workspace-write sandboxing when starting or resuming a thread.
 - `codex_execution_mode = "danger-full-access"` asks for `approvalPolicy = "never"` plus full-access sandboxing and should only be used on a trusted machine.
+- When configured, `model` and `effort` are sent on every `turn/start`. This lets one bot stay pinned to a model profile such as `gpt-5.4` + `xhigh`.
+- `effort` currently accepts `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Not every model necessarily supports every effort level; if Codex rejects a combination, lower the effort or change the model.
 - If an older saved Codex thread still behaves like a read-only session after you change this setting, send `/reset` in Telegram to start a fresh thread.

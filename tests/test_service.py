@@ -32,6 +32,8 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                         telegram_user_id=None,
                         skip_git_repo_check=True,
                         codex_execution_mode="full-auto",
+                        model=None,
+                        effort=None,
                     ),
                 ),
             )

@@ -210,11 +210,16 @@ class _AppServerSession:
         return params
 
     def _turn_start_params(self, thread_id: str, prompt: str) -> Dict[str, Any]:
-        return {
+        params: Dict[str, Any] = {
             "threadId": thread_id,
             "input": [{"type": "text", "text": prompt}],
             "cwd": str(self.bot.workdir),
         }
+        if self.bot.model is not None:
+            params["model"] = self.bot.model
+        if self.bot.effort is not None:
+            params["effort"] = self.bot.effort
+        return params
 
     async def _send_request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         request_id = self._next_request_id()

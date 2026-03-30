@@ -12,6 +12,9 @@ log_level = "INFO"
 #   - "default": use the Codex machine/session default.
 #   - "full-auto": request `approvalPolicy = "never"` and workspace-write sandboxing; recommended for this bridge.
 #   - "danger-full-access": request `approvalPolicy = "never"` and full access; only use on a trusted machine.
+# - Optional `model` and `effort` values are passed to `turn/start`.
+#   - Example: `model = "gpt-5.4"` with `effort = "xhigh"`.
+#   - Valid `effort` values: "none", "minimal", "low", "medium", "high", "xhigh".
 # - `skip_git_repo_check` is accepted for backward compatibility with the older `codex exec` backend and is not required here.
 
 [[bots]]
@@ -20,6 +23,8 @@ token = "123456789:replace-with-your-bot-token"
 workdir = "/absolute/path/to/your/workdir"
 telegram_username = "@your_telegram_username"
 codex_execution_mode = "full-auto"
+model = "gpt-5.4"
+effort = "high"
 
 # Optional stronger binding if you want to pin a numeric Telegram user id too.
 # telegram_user_id = 123456789
@@ -30,6 +35,8 @@ token = "123456789:replace-with-your-second-bot-token"
 workdir = "/absolute/path/to/your/second/workdir"
 telegram_username = "@your_telegram_username"
 codex_execution_mode = "full-auto"
+model = "gpt-5.4"
+effort = "xhigh"
 
 [[bots]]
 name = "docs-repo"
