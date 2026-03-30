@@ -455,6 +455,11 @@ class CodexClient:
         except _JsonRpcError as exc:
             raise CodexExecutionError(str(exc)) from exc
 
+    async def shutdown(self) -> None:
+        for session in self._sessions.values():
+            await session._stop_process()
+        self._sessions.clear()
+
 
 def _normalize_notification(method: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == "thread/started":

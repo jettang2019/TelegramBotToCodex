@@ -1,4 +1,4 @@
-.PHONY: run start stop restart status logs debug debug-start
+.PHONY: run start stop restart status logs debug debug-start test
 
 run:
 	./scripts/service.sh run
@@ -23,3 +23,6 @@ debug:
 
 debug-start:
 	LOG_LEVEL=DEBUG ./scripts/service.sh start
+
+test:
+	PYTHONPATH=src python3 -m unittest discover -s tests -v

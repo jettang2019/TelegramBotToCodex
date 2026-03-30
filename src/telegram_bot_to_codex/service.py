@@ -39,7 +39,14 @@ class BridgeService:
 
     async def run(self) -> None:
         runners = [asyncio.create_task(self._poll_bot(bot)) for bot in self.config.bots]
-        await asyncio.gather(*runners)
+        try:
+            await asyncio.gather(*runners)
+        finally:
+            for task in list(self._tasks):
+                task.cancel()
+            if self._tasks:
+                await asyncio.gather(*self._tasks, return_exceptions=True)
+            await self.codex.shutdown()
 
     async def _poll_bot(self, bot: BotSettings) -> None:
         LOGGER.info("Polling bot '%s' for workdir %s", bot.name, bot.workdir)
@@ -47,6 +54,7 @@ class BridgeService:
         if offset is not None:
             LOGGER.info("Resuming Telegram update offset %s for bot '%s'", offset, bot.name)
 
+        backoff = 0.0
         while True:
             try:
                 updates = await self.telegram.get_updates(
@@ -54,6 +62,7 @@ class BridgeService:
                     offset=offset,
                     timeout_seconds=self.config.app.poll_timeout_seconds,
                 )
+                backoff = 0.0
                 if updates:
                     LOGGER.info("Received %s update(s) for bot '%s'", len(updates), bot.name)
                 for update in updates:
@@ -65,11 +74,13 @@ class BridgeService:
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
             except TelegramApiError:
-                LOGGER.exception("Telegram polling failed for bot '%s'", bot.name)
-                await asyncio.sleep(3)
+                backoff = min(backoff * 2 or 3, 60)
+                LOGGER.exception("Telegram polling failed for bot '%s'; retrying in %.0fs", bot.name, backoff)
+                await asyncio.sleep(backoff)
             except Exception:
-                LOGGER.exception("Unexpected polling failure for bot '%s'", bot.name)
-                await asyncio.sleep(3)
+                backoff = min(backoff * 2 or 3, 60)
+                LOGGER.exception("Unexpected polling failure for bot '%s'; retrying in %.0fs", bot.name, backoff)
+                await asyncio.sleep(backoff)
 
     async def _handle_update(self, bot: BotSettings, update: Dict[str, Any]) -> None:
         message = update.get("message")

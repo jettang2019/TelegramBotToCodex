@@ -49,7 +49,11 @@ def main() -> int:
     logger.info("Configured bots: %s", len(config.bots))
 
     state = StateStore(config.app.state_path)
-    asyncio.run(_run(config, state))
+    try:
+        asyncio.run(_run(config, state))
+    except RuntimeError as exc:
+        logger.error("Startup failed: %s", exc)
+        return 1
     return 0
 
 
