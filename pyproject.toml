@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-bot-to-codex"
+version = "0.1.0"
+description = "Telegram bot bridge for Codex CLI with file-based config and local state."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  'tomli>=2.0.1; python_version < "3.11"',
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
