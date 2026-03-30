@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .codex import CodexClient, CodexExecutionError
@@ -11,6 +12,7 @@ from .state import StateStore
 from .telegram_api import TelegramApiClient, TelegramApiError
 
 LOGGER = logging.getLogger(__name__)
+_STREAM_EDIT_INTERVAL_SECONDS = 0.75
 
 
 @dataclass
@@ -18,6 +20,11 @@ class _StreamProgressState:
     status_message_id: Optional[int]
     last_status_text: Optional[str] = None
     last_streamed_reply: Optional[str] = None
+    active_stream_item_id: Optional[str] = None
+    active_stream_text: str = ""
+    active_stream_message_ids: List[int] = field(default_factory=list)
+    active_stream_chunks: List[str] = field(default_factory=list)
+    last_stream_flush_at: float = 0.0
 
 
 class BridgeService:
@@ -167,27 +174,40 @@ class BridgeService:
         )
 
         async def handle_codex_event(event: Dict[str, Any]) -> None:
+            event_type = event.get("type")
             item = event.get("item", {})
+            if event_type == "item.agent_message.delta":
+                item_id = event.get("item_id")
+                delta = event.get("delta")
+                if isinstance(item_id, str) and isinstance(delta, str):
+                    self._prepare_stream_item(stream_state, item_id)
+                    stream_state.active_stream_text += delta
+                    await self._flush_streamed_reply(
+                        bot,
+                        chat_id,
+                        stream_state,
+                        force=False,
+                    )
+
             if (
-                event.get("type") == "item.completed"
+                event_type == "item.completed"
                 and isinstance(item, dict)
                 and item.get("type") == "agent_message"
             ):
+                item_id = item.get("id")
+                if isinstance(item_id, str):
+                    self._prepare_stream_item(stream_state, item_id)
                 streamed_text = item.get("text")
-                if isinstance(streamed_text, str) and streamed_text.strip():
-                    normalized_text = streamed_text.strip()
+                if isinstance(streamed_text, str):
+                    stream_state.active_stream_text = streamed_text
+                normalized_text = stream_state.active_stream_text.strip()
+                if normalized_text:
                     stream_state.last_streamed_reply = normalized_text
-                    LOGGER.info(
-                        "Streaming agent message for bot '%s' chat %s (%s chars)",
-                        bot.name,
-                        chat_id,
-                        len(normalized_text),
-                    )
-                    await self._send_reply(
+                    await self._flush_streamed_reply(
                         bot,
                         chat_id,
-                        normalized_text,
-                        reply_to_message_id=None,
+                        stream_state,
+                        force=True,
                     )
 
             status_text = _stream_event_status_text(event)
@@ -270,6 +290,11 @@ class BridgeService:
                 bot.name,
                 chat_id,
             )
+
+        if not stream_state.last_streamed_reply:
+            active_stream_text = stream_state.active_stream_text.strip()
+            if active_stream_text == result.reply:
+                stream_state.last_streamed_reply = active_stream_text
 
         if stream_state.status_message_id is not None:
             final_status = "Codex finished processing your request."
@@ -388,6 +413,60 @@ class BridgeService:
             stream_state.status_message_id,
             text,
         )
+
+    def _prepare_stream_item(self, stream_state: _StreamProgressState, item_id: str) -> None:
+        if stream_state.active_stream_item_id == item_id:
+            return
+        stream_state.active_stream_item_id = item_id
+        stream_state.active_stream_text = ""
+        stream_state.active_stream_message_ids = []
+        stream_state.active_stream_chunks = []
+        stream_state.last_stream_flush_at = 0.0
+
+    async def _flush_streamed_reply(
+        self,
+        bot: BotSettings,
+        chat_id: int,
+        stream_state: _StreamProgressState,
+        *,
+        force: bool,
+    ) -> None:
+        normalized_text = stream_state.active_stream_text.strip()
+        if not normalized_text:
+            return
+
+        now = time.monotonic()
+        if (
+            not force
+            and stream_state.active_stream_message_ids
+            and now - stream_state.last_stream_flush_at < _STREAM_EDIT_INTERVAL_SECONDS
+        ):
+            return
+
+        desired_chunks = _split_telegram_message(normalized_text)
+        for index, chunk in enumerate(desired_chunks):
+            if index < len(stream_state.active_stream_message_ids):
+                if index < len(stream_state.active_stream_chunks) and stream_state.active_stream_chunks[index] == chunk:
+                    continue
+                await self._edit_status_message(
+                    bot,
+                    chat_id,
+                    stream_state.active_stream_message_ids[index],
+                    chunk,
+                )
+            else:
+                message_id = await self._send_reply(
+                    bot,
+                    chat_id,
+                    chunk,
+                    reply_to_message_id=None,
+                )
+                if message_id is None:
+                    return
+                stream_state.active_stream_message_ids.append(message_id)
+
+        stream_state.active_stream_chunks = desired_chunks
+        stream_state.last_stream_flush_at = now
 
 
 def _split_telegram_message(text: str, limit: int = 4000) -> List[str]:

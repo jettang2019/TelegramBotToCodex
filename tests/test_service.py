@@ -41,10 +41,13 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
 
             sent_messages = []
             edited_messages = []
+            next_message_id = 9000
 
             async def fake_send_reply(bot, chat_id, text, reply_to_message_id):
+                nonlocal next_message_id
+                next_message_id += 1
                 sent_messages.append((chat_id, text, reply_to_message_id))
-                return 9001
+                return next_message_id
 
             async def fake_edit_status_message(bot, chat_id, message_id, text):
                 edited_messages.append((chat_id, message_id, text))
@@ -66,9 +69,24 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                     )
                     await event_callback(
                         {
+                            "type": "item.agent_message.delta",
+                            "item_id": "item-1",
+                            "delta": "Final",
+                        }
+                    )
+                    await event_callback(
+                        {
+                            "type": "item.agent_message.delta",
+                            "item_id": "item-1",
+                            "delta": " answer",
+                        }
+                    )
+                    await event_callback(
+                        {
                             "type": "item.completed",
                             "item": {
                                 "type": "agent_message",
+                                "id": "item-1",
                                 "text": "Final answer",
                             },
                         }
@@ -98,7 +116,7 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                 sent_messages,
                 [
                     (42, "Message received. Codex is starting now.", 7),
-                    (42, "Final answer", None),
+                    (42, "Final", None),
                 ],
             )
             self.assertEqual(
@@ -106,6 +124,7 @@ class ServiceStreamingTests(unittest.IsolatedAsyncioTestCase):
                 [
                     (42, 9001, "Codex started working on your request."),
                     (42, 9001, "Running command: bash -lc ls"),
+                    (42, 9002, "Final answer"),
                     (42, 9001, "Codex finished processing your request."),
                 ],
             )

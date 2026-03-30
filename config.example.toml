@@ -8,17 +8,17 @@ log_level = "INFO"
 # - One bot maps to one workdir.
 # - Add more [[bots]] blocks when you need more bot + repo pairs.
 # - `telegram_username` may include or omit the leading @.
-# - `codex_execution_mode` controls which Codex CLI execution flag is used for this bot.
-#   - "default": no extra flag; use the machine/session default Codex execution mode.
-#   - "full-auto": adds `--full-auto`; recommended default for this bridge.
-#   - "danger-full-access": adds `--dangerously-bypass-approvals-and-sandbox`; only use on a trusted machine.
+# - `codex_execution_mode` controls which approval and sandbox settings are requested from `codex app-server`.
+#   - "default": use the Codex machine/session default.
+#   - "full-auto": request `approvalPolicy = "never"` and workspace-write sandboxing; recommended for this bridge.
+#   - "danger-full-access": request `approvalPolicy = "never"` and full access; only use on a trusted machine.
+# - `skip_git_repo_check` is accepted for backward compatibility with the older `codex exec` backend and is not required here.
 
 [[bots]]
 name = "repo-a"
 token = "123456789:replace-with-your-bot-token"
 workdir = "/absolute/path/to/your/workdir"
 telegram_username = "@your_telegram_username"
-skip_git_repo_check = true
 codex_execution_mode = "full-auto"
 
 # Optional stronger binding if you want to pin a numeric Telegram user id too.
@@ -29,7 +29,6 @@ name = "repo-b"
 token = "123456789:replace-with-your-second-bot-token"
 workdir = "/absolute/path/to/your/second/workdir"
 telegram_username = "@your_telegram_username"
-skip_git_repo_check = true
 codex_execution_mode = "full-auto"
 
 [[bots]]
@@ -37,6 +36,5 @@ name = "docs-repo"
 token = "123456789:replace-with-your-third-bot-token"
 workdir = "/absolute/path/to/your/docs/repo"
 telegram_username = "your_telegram_username"
-skip_git_repo_check = false
 codex_execution_mode = "default"
 # telegram_user_id = 123456789

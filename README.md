@@ -90,13 +90,14 @@ Any other text message is forwarded to Codex.
 ## Notes
 
 - This service only handles private chats.
-- Long-running Codex tasks stream Codex JSONL events back into Telegram. The bot keeps one English status message updated and forwards agent messages as soon as they arrive.
+- The bridge keeps one long-lived `codex app-server` session per configured bot. Telegram messages become turns inside that session, so there is less per-message startup overhead than the older `codex exec` approach.
+- Long-running Codex tasks stream `codex app-server` events back into Telegram. The bot keeps one English status message updated and incrementally edits the reply as agent message text arrives.
 - On startup the service validates the configured `codex` binary and every Telegram bot token.
 - Username-based access control depends on the Telegram username staying unchanged. If the username
   changes, update `config.toml`.
 - Use `/whoami` once from Telegram if you want to copy your numeric `telegram_user_id` into
   `config.toml`.
-- If the target `workdir` is not a Git repository, leave `skip_git_repo_check = true`.
-- `codex_execution_mode = "full-auto"` is the recommended write-capable mode for this bridge. It maps to Codex CLI `--full-auto`, which uses workspace-write sandboxing.
-- `codex_execution_mode = "danger-full-access"` maps to `--dangerously-bypass-approvals-and-sandbox` and should only be used on a trusted machine.
+- `skip_git_repo_check` is still accepted in the config for backward compatibility, but the current `app-server` backend does not map that field to a verified Codex setting.
+- `codex_execution_mode = "full-auto"` is the recommended write-capable mode for this bridge. In this project it asks `app-server` for `approvalPolicy = "never"` plus workspace-write sandboxing when starting or resuming a thread.
+- `codex_execution_mode = "danger-full-access"` asks for `approvalPolicy = "never"` plus full-access sandboxing and should only be used on a trusted machine.
 - If an older saved Codex thread still behaves like a read-only session after you change this setting, send `/reset` in Telegram to start a fresh thread.
