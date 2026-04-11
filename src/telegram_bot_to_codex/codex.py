@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Dict, List, Optional, Tuple, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .config import BotSettings
 
@@ -253,11 +253,8 @@ class _AppServerSession:
             return
 
         try:
-            while True:
-                raw_line = await self.process.stdout.readline()
-                if not raw_line:
-                    break
-                line = raw_line.decode("utf-8", errors="replace").strip()
+            async for raw_line in _read_stream_lines(self.process.stdout):
+                line = raw_line.strip()
                 if not line:
                     continue
                 await self._handle_stdout_line(line)
@@ -418,11 +415,8 @@ class _AppServerSession:
             return
 
         try:
-            while True:
-                raw_line = await self.process.stderr.readline()
-                if not raw_line:
-                    break
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
+            async for raw_line in _read_stream_lines(self.process.stderr):
+                line = raw_line.rstrip()
                 if line:
                     LOGGER.warning("Codex app-server stderr for bot '%s': %s", self.bot.name, line)
         except asyncio.CancelledError:
@@ -509,6 +503,28 @@ def _normalize_notification(method: str, params: Dict[str, Any]) -> Optional[Dic
         }
 
     return None
+
+
+async def _read_stream_lines(stream: Any, chunk_size: int = 16384) -> AsyncIterator[str]:
+    buffer = bytearray()
+
+    while True:
+        chunk = await stream.read(chunk_size)
+        if not chunk:
+            if buffer:
+                yield buffer.decode("utf-8", errors="replace")
+            return
+
+        buffer.extend(chunk)
+
+        while True:
+            newline_index = buffer.find(b"\n")
+            if newline_index < 0:
+                break
+
+            line = bytes(buffer[:newline_index])
+            del buffer[: newline_index + 1]
+            yield line.decode("utf-8", errors="replace")
 
 
 def _normalize_item(item: Dict[str, Any]) -> Dict[str, Any]:
